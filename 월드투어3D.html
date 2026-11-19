@@ -2,11 +2,17 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>월드 투어 3D</title>
 <style>
 :root{--panel:rgba(15,23,42,.84);--line:rgba(255,255,255,.1);--text:#f1f5f9;--muted:#94a3b8;--accent:#fbbf24}
-*{box-sizing:border-box}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+button,.btn,.ibtn{touch-action:manipulation}
+body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overscroll-behavior:none}
+input{-webkit-user-select:text;user-select:text}
 html,body{margin:0;height:100%;overflow:hidden;color:var(--text);font-family:"Pretendard","Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif;background:radial-gradient(ellipse at 50% 0%,#24476b 0%,#0b1626 65%,#060b14 100%)}
 #c{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
 #c:active{cursor:grabbing}
@@ -137,6 +143,18 @@ body.touch #shopPrompt{cursor:pointer}
 #shopWrap{z-index:21}
 #itemBtns{display:flex;gap:8px;flex-wrap:wrap}
 #itemBtns .btn{padding:9px 12px;font-size:13.5px}
+/* 모바일 조작: 가상 조이스틱 + 점프 버튼 */
+#touchCtl{display:none}
+body.touch.inLobby #touchCtl.on{display:block}
+#joy{position:fixed;left:calc(18px + env(safe-area-inset-left));bottom:calc(18px + env(safe-area-inset-bottom));width:132px;height:132px;border-radius:50%;background:rgba(15,23,42,.45);border:2px solid rgba(255,255,255,.25);z-index:8;touch-action:none}
+#joyKnob{position:absolute;left:50%;top:50%;width:58px;height:58px;margin:-29px 0 0 -29px;border-radius:50%;background:rgba(255,255,255,.75);box-shadow:0 4px 12px rgba(0,0,0,.4);pointer-events:none}
+#jumpBtn{position:fixed;right:calc(22px + env(safe-area-inset-right));bottom:calc(30px + env(safe-area-inset-bottom));width:92px;height:92px;border-radius:50%;border:2px solid rgba(255,255,255,.35);background:rgba(251,191,36,.85);color:#1f1300;font:900 15px/1.2 inherit;z-index:8;touch-action:none;box-shadow:0 4px 0 #b45309}
+#jumpBtn:active{transform:translateY(3px);box-shadow:0 1px 0 #b45309}
+body.touch #shopPrompt kbd{display:none}
+body.touch #lbHint{display:none}
+body.touch #lbRooms{top:calc(64px + env(safe-area-inset-top));bottom:auto;left:12px;right:auto;width:min(270px,calc(100vw - 24px));max-height:34vh;overflow:auto}
+body.touch #shopPrompt{top:auto;bottom:calc(170px + env(safe-area-inset-bottom))}
+body.touch #lbTop{max-width:calc(100vw - 16px);flex-wrap:wrap;justify-content:center;white-space:normal;top:calc(8px + env(safe-area-inset-top))}
 @media(max-width:760px){
   #lbRooms{top:auto;bottom:12px;left:12px;right:12px;width:auto;max-height:36vh;overflow:auto}
   #roomPanel{top:auto;bottom:12px;right:12px;left:12px;width:auto;transform:none;max-height:60vh;overflow:auto}
@@ -266,6 +284,7 @@ label.l{display:block;font-size:12px;color:var(--muted);margin-top:14px;font-wei
   <div id="lbRooms" class="panel"></div>
   <div id="lbHint" class="panel">⌨️ WASD·방향키로 걷기 · 바닥 클릭 = 그곳으로 걷기 · 스페이스바 = 점프 · 드래그 = 시점 회전 · 🚪 포탈에 들어가면 방 입장 · 🛒 가게 앞에서 <b>E</b> = 상점 열기</div>
   <div id="shopPrompt" class="panel"><kbd>E</kbd><span>🛒 상점 열기</span></div>
+  <div id="touchCtl"><div id="joy"><div id="joyKnob"></div></div><button id="jumpBtn">⬆️<br>점프</button></div>
   <div id="roomPanel" class="panel"></div>
 </div>
 
@@ -2476,7 +2495,7 @@ $('#shopClose').onclick = () => { $('#shopWrap').style.display = 'none'; };
 // 상점은 가게 근처에서 E키를 눌러야만 열림 (키보드가 없는 터치 기기는 안내 버튼을 눌러서)
 let nearShop = false;
 const SHOP_NEAR = 2.6;
-const isTouch = matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches;
+const isTouch = matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && !matchMedia('(hover: hover)').matches);
 if (isTouch) document.body.classList.add('touch');
 function tryOpenShop() { if (lobbyOn && nearShop && !inRoom() && !overlayOpen()) openShop(); }
 addEventListener('keydown', e => {
@@ -2619,7 +2638,23 @@ addEventListener('keydown', e => {
   if (e.code === 'Space') { e.preventDefault(); if (!e.repeat && !inRoom() && av.y === 0) av.vy = 7.5; }
 });
 addEventListener('keyup', e => lkeys.delete(e.code));
-addEventListener('blur', () => lkeys.clear());
+addEventListener('blur', () => { lkeys.clear(); joyReset(); });
+// ---- 모바일: 가상 조이스틱(걷기) + 점프 버튼
+const joy = {x: 0, y: 0, id: null};
+const joyEl = $('#joy'), joyKnob = $('#joyKnob');
+function joyReset() { joy.x = joy.y = 0; joy.id = null; joyKnob.style.transform = ''; }
+function joyMove(e) {
+  const r = joyEl.getBoundingClientRect(), max = r.width / 2;
+  let dx = e.clientX - (r.left + max), dy = e.clientY - (r.top + max);
+  const d = Math.hypot(dx, dy); if (d > max) { dx *= max / d; dy *= max / d; }
+  joyKnob.style.transform = `translate(${dx}px,${dy}px)`;
+  const m = Math.hypot(dx, dy) / max;
+  if (m < 0.18) { joy.x = joy.y = 0; } else { joy.x = dx / max; joy.y = -dy / max; }
+}
+joyEl.addEventListener('pointerdown', e => { e.preventDefault(); joy.id = e.pointerId; joyEl.setPointerCapture(e.pointerId); joyMove(e); });
+joyEl.addEventListener('pointermove', e => { if (e.pointerId === joy.id) joyMove(e); });
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => joyEl.addEventListener(t, e => { if (e.pointerId === joy.id) joyReset(); }));
+$('#jumpBtn').addEventListener('pointerdown', e => { e.preventDefault(); if (lobbyOn && !inRoom() && av.y === 0) av.vy = 7.5; });
 function overlayOpen() {
   return ['#setup', '#shopWrap', '#modalWrap'].some(s => $(s).style.display === 'flex') || $('#intro').style.display !== 'none';
 }
@@ -2639,7 +2674,10 @@ function lobbyTick(now) {
     if (lkeys.has('KeyS') || lkeys.has('ArrowDown')) iz -= 1;
     if (lkeys.has('KeyA') || lkeys.has('ArrowLeft')) ix -= 1;
     if (lkeys.has('KeyD') || lkeys.has('ArrowRight')) ix += 1;
+    ix += joy.x; iz += joy.y;
   }
+  const ctlOn = isTouch && !inRoom() && !overlayOpen();
+  if ($('#touchCtl').classList.contains('on') !== ctlOn) { $('#touchCtl').classList.toggle('on', ctlOn); if (!ctlOn) joyReset(); }
   const dir = new THREE.Vector3();
   if (ix || iz) { dir.set(fx * iz + rx * ix, 0, fz * iz + rz * ix).normalize(); av.target = null; av.onArrive = null; }
   else if (av.target) {
