@@ -138,6 +138,7 @@ body.touch #shopPrompt{cursor:pointer}
 .shopItem .pr{font-size:12px;color:var(--accent);margin-top:4px}
 .shopItem.eq{border-color:#4ade80;background:rgba(74,222,128,.15)}
 .shopItem.poor{opacity:.5}
+.shopItem.taken{opacity:.35;cursor:not-allowed}
 .tag.job{background:rgba(251,191,36,.18);color:#fde68a;white-space:nowrap}
 .shopItem:hover{filter:brightness(1.2)}
 #shopWrap{z-index:21}
@@ -2419,6 +2420,7 @@ const SHOP = [
   {id: 'col-black', kind: 'color', e: '⚫', n: '블랙', price: 60, color: '#263238'},
   {id: 'col-white', kind: 'color', e: '⚪', n: '화이트', price: 60, color: '#eceff1'},
   {id: 'col-mint', kind: 'color', e: '🟢', n: '민트', price: 80, color: '#4dd0b0'},
+  {id: 'col-beige', kind: 'color', e: '🤎', n: '베이지', price: 60, color: '#d8c3a0'},
   {id: 'col-gold', kind: 'color', e: '🟡', n: '황금', price: 250, color: '#ffb300'},
   {id: 'shape-ball', kind: 'shape', e: '⚪', n: '동그라미', price: 0, shape: 'ball'},
   {id: 'shape-box', kind: 'shape', e: '🟥', n: '네모 캐릭터', price: 50, shape: 'box'},
@@ -2443,12 +2445,21 @@ const jobTag = id => { const j = jobOf(id); return `<span class="tag job" title=
 const randomJob = () => JOBS[Math.floor(Math.random() * JOBS.length)].id;
 const hatEmoji = id => (SHOP.find(i => i.id === id) || {}).e || '';
 
+// 광장(같은 서버)에 있는 다른 사람이 지금 쓰고 있는 색깔들 → 그 사람이 바꿀 때까지 고를 수 없음
+function usedColors() {
+  const set = new Set();
+  for (const g of ghosts.values()) if (g.c) set.add(g.c.toLowerCase());
+  return set;
+}
+const colorTaken = hex => hex.toLowerCase() !== (profile.color || '').toLowerCase() && usedColors().has(hex.toLowerCase());
+function shopErr(text) { $('#shopMsg').textContent = text; $('#shopMsg').classList.add('err'); }
 function renderShop(msg = '') {
   const own = id => { const it = SHOP.find(i => i.id === id); return (it && it.price === 0) || profile.owned.includes(id); };
   const item = it => {
     const eq = it.kind === 'hat' ? profile.hat === it.id : it.kind === 'shape' ? profile.shape === it.shape : profile.color === it.color;
-    const label = own(it.id) ? (eq ? (it.kind === 'hat' ? '✅ 착용 중 (벗기)' : '✅ 사용 중') : '착용하기') : `🪙 ${it.price}`;
-    return `<button type="button" class="shopItem ${eq ? 'eq' : ''} ${!own(it.id) && profile.coins < it.price ? 'poor' : ''}" data-id="${it.id}">
+    const taken = it.kind === 'color' && colorTaken(it.color);
+    const label = taken ? '🔒 다른 사람이 사용 중' : own(it.id) ? (eq ? (it.kind === 'hat' ? '✅ 착용 중 (벗기)' : '✅ 사용 중') : '착용하기') : `🪙 ${it.price}`;
+    return `<button type="button" class="shopItem ${eq ? 'eq' : ''} ${taken ? 'taken' : ''} ${!own(it.id) && profile.coins < it.price ? 'poor' : ''}" data-id="${it.id}">
       <div class="em">${it.e}</div><div>${it.n}</div><div class="pr">${label}</div></button>`;
   };
   $('#shopBody').innerHTML = `<h2 style="margin:0 0 2px">🛒 상점</h2>
@@ -2468,7 +2479,8 @@ function renderShop(msg = '') {
     <label class="l">🎩 꾸미기 (게임 말에도 그대로 나와요)</label><div class="shopGrid">${SHOP.filter(i => i.kind === 'hat').map(item).join('')}</div>
     <label class="l">✨ 특별 색깔</label><div class="shopGrid">${SHOP.filter(i => i.kind === 'color').map(item).join('')}</div>
     <label class="l">🎨 기본 색깔 (무료)</label><div class="palette">${PALETTE.map(([hex, n]) =>
-      `<button type="button" class="pal${hex === profile.color ? ' sel' : ''}" data-c="${hex}" style="background:${hex}" title="${n}"></button>`).join('')}</div>
+      `<button type="button" class="pal${hex === profile.color ? ' sel' : ''}" data-c="${hex}" style="background:${hex}" title="${colorTaken(hex) ? `${n} (다른 사람이 사용 중)` : n}"${colorTaken(hex) ? ' disabled' : ''}></button>`).join('')}</div>
+    ${usedColors().size ? '<div class="netMsg" style="text-align:left">🔒 흐린 색은 광장에 있는 다른 사람이 쓰는 중이에요. 그 사람이 색을 바꾸면 쓸 수 있어요</div>' : ''}
     <div class="netMsg" id="shopMsg">${esc(msg)}</div>`;
   document.querySelectorAll('.shopItem[data-id]').forEach(el => el.onclick = () => shopClick(el.dataset.id));
   document.querySelectorAll('.shopItem[data-job]').forEach(el => el.onclick = () => jobClick(el.dataset.job));
@@ -2489,11 +2501,15 @@ function renderShop(msg = '') {
     $('#renameBtn').onclick = go;
     $('#renameIn').onkeydown = e => { if (e.key === 'Enter') go(); };
   }
-  document.querySelectorAll('#shopBody .pal').forEach(el => el.onclick = () => { profile.color = el.dataset.c; afterShopChange('색깔을 바꿨어요!'); });
+  document.querySelectorAll('#shopBody .pal').forEach(el => el.onclick = () => {
+    if (colorTaken(el.dataset.c)) return shopErr('🔒 다른 사람이 쓰고 있는 색깔이에요');
+    profile.color = el.dataset.c; afterShopChange('색깔을 바꿨어요!');
+  });
 }
 function shopClick(id) {
   const it = SHOP.find(i => i.id === id);
   if (!it) return;
+  if (it.kind === 'color' && colorTaken(it.color)) return shopErr(`🔒 ${it.n}은(는) 다른 사람이 쓰고 있어요. 그 사람이 바꾸면 쓸 수 있어요`);
   let msg;
   if (it.price > 0 && !profile.owned.includes(id)) {
     if (profile.coins < it.price) { $('#shopMsg').textContent = `코인이 ${it.price - profile.coins}개 부족해요 😢`; $('#shopMsg').classList.add('err'); return; }
@@ -3116,14 +3132,24 @@ function applyGhosts(list, myId) {
       obj.position.set(g.x, 0, g.z);
       ghosts.set(s.id, g);
     }
-    g.tx = s.x; g.tz = s.z; g.ty = s.y; g.tr = s.r;
+    g.tx = s.x; g.tz = s.z; g.ty = s.y; g.tr = s.r; g.c = s.c;
   }
   for (const id of [...ghosts.keys()]) if (!seen.has(id)) removeGhost(id);
+  refreshShopColors();
+}
+// 다른 사람이 쓰는 색깔 목록이 바뀌면 열려 있는 상점을 다시 그림
+let lastUsedSig = '';
+function refreshShopColors() {
+  const sig = [...usedColors()].sort().join(',');
+  if (sig === lastUsedSig) return;
+  lastUsedSig = sig;
+  if ($('#shopWrap').style.display === 'flex' && !$('#renameIn')) renderShop();
 }
 function removeGhost(id) {
   const g = ghosts.get(id); if (!g) return;
   lobbyScene.remove(g.obj); g.tag.material.map.dispose(); g.tag.material.dispose();
   ghosts.delete(id);
+  refreshShopColors();
 }
 function clearGhosts() { for (const id of [...ghosts.keys()]) removeGhost(id); }
 // 받은 위치로 부드럽게 따라감 (걷는 모양도)
