@@ -1323,13 +1323,26 @@ function modal(html, buttons, opts = {}) {
     $('#modalBody').innerHTML = html; bb.innerHTML = '';
     bb.style.display = buttons.length ? 'flex' : 'none';
     bb.classList.toggle('many', buttons.length > 4);
-    const close = v => { if (my !== modalToken) return; modalToken++; wrap.style.display = 'none'; res(v); };
+    let cdIv = null;
+    const close = v => { if (my !== modalToken) return; modalToken++; clearInterval(cdIv); wrap.style.display = 'none'; res(v); };
     buttons.forEach(b => {
       const el = document.createElement('button'); el.className = 'btn ' + (b.cls || ''); el.innerHTML = b.label;
       el.disabled = !!b.disabled; el.onclick = () => close(b.value); bb.appendChild(el);
     });
     wrap.style.display = 'flex';
     if (opts.auto) setTimeout(() => close(opts.autoValue ?? null), opts.auto);
+    if (opts.countdown) { // 제한 시간: 다 지나면 autoValue로 자동 결정
+      const end = Date.now() + opts.countdown * 1000;
+      const cd = document.createElement('div');
+      cd.style.cssText = 'text-align:center;margin-top:8px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums';
+      $('#modalBody').appendChild(cd);
+      const tick = () => {
+        const left = Math.ceil((end - Date.now()) / 1000);
+        if (left <= 0) return close(opts.autoValue ?? null);
+        cd.textContent = `⏱ ${left}초 안에 고르지 않으면 자동으로 패스!`;
+      };
+      tick(); cdIv = setInterval(tick, 250);
+    }
   });
 }
 const nm = p => `<b style="color:${p.color}">${esc(p.name)}</b>`;
@@ -1462,7 +1475,7 @@ $('#helpBtn').onclick = () => $('#modalWrap').style.display !== 'flex' && modal(
   <li>남의 땅에서는 통행료를 내고, <b>2배 가격으로 인수</b>할 수 있어요 (랜드마크는 인수 불가).</li>
   <li><b>🚔 감옥</b>: 3턴 동안 수감, 더블이 나와야만 탈출. <b>🏝️ 섬</b>: 레모네이드를 받고 1턴 휴식. <b>🚌 버스</b>: 원하는 칸으로 무료 이동 (가장 가까운 길: 대각선·뒤로).</li>
   <li>출발지를 지나거나 도착하면 월급 <b>100만원</b>!</li>
-  <li>행운 카드는 17종 중 무작위! 🎰복권(10%), 🏆랜드마크(15%), 🤬책상 뒤집기(1%), ☢️핵폭탄(1%), ☠️즉사(5%), 👻귀신❤️you(10%), 🤑나는 부자가 될 거야(10%), ⏪뒤로 가기(3~1000칸) 등</li>
+  <li>행운 카드는 18종 중 무작위! 🎰복권(10%), 🏆랜드마크(15%), 🤬책상 뒤집기(1%), ☢️핵폭탄(1%), ☠️즉사(5%), 👻귀신❤️you(10%), 🤑나는 부자가 될 거야(10%), 🔄대역전(1등↔꼴등 돈 바꾸기, 10%), ⏪뒤로 가기(3~1000칸) 등</li>
   <li>🌮 타코는 [타코 먹기]로 +10만원, 🍋 레모네이드는 [레모네이드 마시기]로 +5만원!</li>
   <li>💼 직업(로비 상점에서 구매): 🐣뉴비 · 💼회사원(월급×1.35) · 🥄흙수저(복권·타코 등 돈×2) · 🤡광대(내 카드가 모두에게) · 🎅산타(10% 주사위×2) · 📹유튜버(누가 굴릴 때 20% 50만원) · 🛒마트 직원(딱 7단계(마트) 건물이 있으면 매 턴 70만원) · 💰금수저(버는 돈·잃는 돈 ×2). 컴퓨터는 무작위 직업!</li>
   <li>🪙 코인: 1등 100코인, 나머지는 꼴등 10코인부터 순위가 하나 오를 때마다 +10코인. 로비 상점에서 꾸미기를 살 수 있어요.</li>
@@ -1697,13 +1710,15 @@ async function handleProperty(p, t) {
   if (t.level < 10) await offerTakeover(p, t, o);
 }
 
+const BUY_TIME_LIMIT = 30; // 땅 구입 제한 시간(초): 지나면 자동으로 패스 → 다음 사람 턴
 async function offerBuy(p, t) {
   let yes;
   if (p.cash < t.price) { addLog(`${nm(p)} 돈이 부족해 ${t.name}을(를) 살 수 없습니다`); if (isLocal(p)) toast('돈이 부족합니다'); await sleep(500); return; }
   if (p.ai) { await sleep(450); yes = p.cash - t.price >= 600000; }
   else yes = await decide(p, () => modal(propCardHTML(t, `보유 현금 <b>${fmt(p.cash)}</b><br>${t.type === 'city' ? '먼저 <b>땅</b>을 사고, 이어서 [턴 넘기기]를 누를 때까지 한 단계씩 올릴 수 있어요.' : '관광지를 구입하시겠습니까?'}`),
-    [{label: `${t.type === 'city' ? '🟫 땅 구입' : '구입'}<br><small>${fmt(t.price)}</small>`, value: true, cls: 'primary'}, {label: '패스', value: false}]),
-    false, waitTxt(p, `${t.name} 구입을 고민 중`));
+    [{label: `${t.type === 'city' ? '🟫 땅 구입' : '구입'}<br><small>${fmt(t.price)}</small>`, value: true, cls: 'primary'}, {label: '패스', value: false}],
+    {countdown: BUY_TIME_LIMIT, autoValue: false}),
+    false, waitTxt(p, `${t.name} 구입을 고민 중 (최대 ${BUY_TIME_LIMIT}초)`));
   if (!yes) { addLog(`${nm(p)} ${t.name} 구입 안 함`); return; }
   p.cash -= t.price; floatMoney(p, -t.price);
   t.owner = p.id; t.level = 1; updateTile(t.idx, true);
@@ -1787,11 +1802,11 @@ async function busRide(p) {
 }
 
 // =====================================================================
-//  행운 카드 (17종, 확률 지정)
+//  행운 카드 (18종, 확률 지정)
 // =====================================================================
 const others = p => players.filter(q => q !== p && !q.bankrupt);
-// 확률 지정 카드 7장(책상1+복권10+랜드마크15+핵폭탄1+즉사5+귀신10+부자10 = 52%)을 뺀 나머지 10장이 48%를 나눠 가짐
-const REST = 48 / 10;
+// 확률 지정 카드 8장(책상1+복권10+랜드마크15+핵폭탄1+즉사5+귀신10+부자10+역전10 = 62%)을 뺀 나머지 10장이 38%를 나눠 가짐
+const REST = 38 / 10;
 // 뒤로 가기 칸수: 3~99 또는 951~1000 (100~950은 안 나옴)
 function randBackSteps() { const k = Math.floor(grand() * 147); return k < 97 ? 3 + k : 951 + (k - 97); }
 // 핵폭탄 연출
@@ -1895,6 +1910,21 @@ const CARDS = [
       addLog(`🤑 ${nm(p)} ${nm(q)}에게서 10만원을 빼앗았다!`); toast(`🤑 ${p.name} ← ${q.name} 100,000원`);
       await pay(q, 100000, p);
       if (dirtMul(p) > 1 && !p.bankrupt) gain(p, 100000, '🥄 흙수저 보너스');
+    }},
+  // 광대여도 한 번만 (모두에게 적용하면 여러 번 뒤바뀌어 의미가 없음)
+  {once: true, e: '🔄', t: '대역전', d: '현금 1등과 꼴등의 돈이 서로 뒤바뀝니다!', w: 10, pct: '10%', c1: '#fcd34d', c2: '#7c3aed',
+    f: async () => {
+      const alive = players.filter(q => !q.bankrupt);
+      if (alive.length < 2) return;
+      const sorted = [...alive].sort((a, b) => b.cash - a.cash);
+      const top = sorted[0], bot = sorted[sorted.length - 1];
+      if (top.cash === bot.cash) { addLog('🔄 모두 돈이 같아서 아무 일도 없었다'); toast('🔄 돈이 모두 같아 효과 없음'); await sleep(900); return; }
+      const a = top.cash, b = bot.cash;
+      top.cash = b; bot.cash = a;
+      floatMoney(top, b - a); floatMoney(bot, a - b);
+      addLog(`🔄 <b>대역전!</b> 1등 ${nm(top)}(${fmt(a)}) ↔ 꼴등 ${nm(bot)}(${fmt(b)}) 돈이 뒤바뀌었다!`);
+      toast(`🔄 ${top.name} ↔ ${bot.name} 돈 체인지!`);
+      updateUI(); await sleep(1200);
     }},
 ];
 function pickCard() {
